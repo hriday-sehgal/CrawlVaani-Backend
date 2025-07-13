@@ -4,7 +4,7 @@ import XLSX from "xlsx";
 import { isUri } from "valid-url";
 import pLimit from "p-limit";
 import puppeteer from "puppeteer";
-import lighthouse from "lighthouse";
+// import lighthouse from "lighthouse"; // DISABLED for better performance
 import analyzeKeywords from "./utils/keywordDensity.js";
 import fs from "fs";
 import path from "path";
@@ -55,7 +55,8 @@ const performanceMetrics = {
   totalResponseTime: 0,
 };
 
-// Lighthouse configuration - SEO only for memory optimization
+// Lighthouse configuration - DISABLED for better performance
+/*
 const lighthouseConfig = {
   extends: "lighthouse:default",
   settings: {
@@ -170,6 +171,7 @@ const lighthouseConfig = {
     ],
   },
 };
+*/
 
 function autoFitColumns(data) {
   const cols = Object.keys(data[0] || {});
@@ -993,7 +995,9 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
     performanceMetrics.averageResponseTime =
       performanceMetrics.totalResponseTime / performanceMetrics.pagesCrawled;
 
+    // Lighthouse analysis disabled for better performance and reliability
     // Only run Lighthouse for the main page
+    /*
     if (currentUrl === mainPageUrl) {
       console.log(`🔍 Running Lighthouse analysis for ${currentUrl}...`);
       const lighthouseResults = await runLighthouseAnalysis(currentUrl);
@@ -1010,6 +1014,7 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
         ttfbStatus: lighthouseResults.ttfbStatus,
       });
     }
+    */
 
     // Mark as working link
     workingLinks.push({ url: currentUrl, status: 200 });
@@ -1087,7 +1092,8 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
   }
 }
 
-// Function to run Lighthouse analysis
+// Function to run Lighthouse analysis - DISABLED for better performance
+/*
 async function runLighthouseAnalysis(url) {
   try {
     const { launch } = await import("chrome-launcher");
@@ -1268,6 +1274,7 @@ async function runLighthouseAnalysis(url) {
     };
   }
 }
+*/
 
 export async function runCrawl(targetUrl, outputDir = "reports") {
   // Reset all stateful arrays and sets
