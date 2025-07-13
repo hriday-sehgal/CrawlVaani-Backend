@@ -107,7 +107,48 @@ setInterval(() => {
   }
 }, RATE_LIMIT_WINDOW);
 
-app.use(cors());
+// CORS configuration
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    // List of allowed origins
+    const allowedOrigins = [
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "https://crawlvaani.vercel.app",
+      "https://*.vercel.app",
+      "https://*.onrender.com",
+      "https://crawlvaani-frontend.vercel.app",
+      "https://crawlvaani-frontend.vercel.app/reports",
+      "https://crawlvaani-frontend.onrender.com",
+    ];
+
+    // Check if origin is allowed
+    const isAllowed = allowedOrigins.some((allowedOrigin) => {
+      if (allowedOrigin.includes("*")) {
+        // Handle wildcard domains
+        const domain = allowedOrigin.replace("*.", "");
+        return origin.endsWith(domain);
+      }
+      return origin === allowedOrigin;
+    });
+
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log(`CORS blocked request from: ${origin}`);
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  optionsSuccessStatus: 200,
+};
+
+app.use(cors(corsOptions));
 // Increased body size limits to handle large website crawl data (120+ pages)
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -1436,9 +1477,39 @@ app.get("/api/seo-checklist/pdf", rateLimit, async (req, res) => {
   }
 });
 
+// Health check endpoint
+app.get("/", (req, res) => {
+  res.json({
+    status: "ok",
+    message: "CrawlVaani Backend API is running",
+    version: "1.0.0",
+    endpoints: {
+      crawl: "/api/crawl",
+      aiAnalysis: "/api/ai/comprehensive-analysis",
+      seoChecklist: "/api/seo-checklist/pdf",
+      reports: "/api/reports/*",
+    },
+    cors: {
+      enabled: true,
+      allowedOrigins: [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://crawlvaani.vercel.app",
+        "https://crawlvaani-frontend.vercel.app",
+        "https://crawlvaani.onrender.com",
+        "https://crawlvaani.com",
+        "https://crawlvaani.in",
+        "https://*.vercel.app",
+        "https://*.onrender.com",
+      ],
+    },
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`SEO Crawler backend running on http://localhost:${PORT}`);
   console.log(`Rate limit: ${MAX_REQUESTS_PER_HOUR} requests per hour per IP`);
   console.log(`Page limit: 50000 pages per crawl`);
   console.log(`AI Analysis: Available via /api/ai/* endpoints`);
+  console.log(`CORS: Enabled for frontend domains`);
 });
