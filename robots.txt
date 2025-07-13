@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /
+
+# Block all crawlers from indexing this API
+# This is a backend API - not meant for public crawling 
