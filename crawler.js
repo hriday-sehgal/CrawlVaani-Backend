@@ -241,78 +241,144 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
     await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_DELAY));
 
     // Use Puppeteer for JavaScript-heavy sites
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--disable-gpu",
-        "--disable-web-security",
-        "--disable-features=VizDisplayCompositor",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-renderer-backgrounding",
-        "--disable-field-trial-config",
-        "--disable-ipc-flooding-protection",
-        "--disable-background-networking",
-        "--disable-default-apps",
-        "--disable-extensions",
-        "--disable-sync",
-        "--disable-translate",
-        "--hide-scrollbars",
-        "--mute-audio",
-        "--no-default-browser-check",
-        "--safebrowsing-disable-auto-update",
-        "--disable-client-side-phishing-detection",
-        "--disable-component-update",
-        "--disable-domain-reliability",
-        "--disable-features=TranslateUI",
-        "--disable-llm",
-        "--disable-logging",
-        "--disable-notifications",
-        "--disable-popup-blocking",
-        "--disable-prompt-on-repost",
-        "--disable-sync-preferences",
-        "--disable-web-resources",
-        "--disable-web-security",
-        "--disable-xss-auditor",
-        "--force-color-profile=srgb",
-        "--metrics-recording-only",
-        "--no-default-browser-check",
-        "--no-first-run",
-        "--no-pings",
-        "--no-zygote",
-        "--password-store=basic",
-        "--use-mock-keychain",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-features=VizDisplayCompositor",
-      ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    });
+    let browser = null;
+    let usePuppeteer = true;
 
-    const page = await browser.newPage();
+    try {
+      const puppeteerOptions = {
+        headless: "new",
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-accelerated-2d-canvas",
+          "--no-first-run",
+          "--no-zygote",
+          "--disable-gpu",
+          "--disable-web-security",
+          "--disable-features=VizDisplayCompositor",
+          "--disable-background-timer-throttling",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-renderer-backgrounding",
+          "--disable-field-trial-config",
+          "--disable-ipc-flooding-protection",
+          "--disable-background-networking",
+          "--disable-default-apps",
+          "--disable-extensions",
+          "--disable-sync",
+          "--disable-translate",
+          "--hide-scrollbars",
+          "--mute-audio",
+          "--no-default-browser-check",
+          "--safebrowsing-disable-auto-update",
+          "--disable-client-side-phishing-detection",
+          "--disable-component-update",
+          "--disable-domain-reliability",
+          "--disable-features=TranslateUI",
+          "--disable-llm",
+          "--disable-logging",
+          "--disable-notifications",
+          "--disable-popup-blocking",
+          "--disable-prompt-on-repost",
+          "--disable-sync-preferences",
+          "--disable-web-resources",
+          "--disable-xss-auditor",
+          "--force-color-profile=srgb",
+          "--metrics-recording-only",
+          "--no-pings",
+          "--password-store=basic",
+          "--use-mock-keychain",
+          "--disable-blink-features=AutomationControlled",
+          "--single-process",
+          "--disable-gpu-sandbox",
+          "--disable-software-rasterizer",
+        ],
+      };
 
-    // Set user agent and viewport
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    );
-    await page.setViewport({ width: 1920, height: 1080 });
+      // Try to find Chrome executable in common locations
+      const possiblePaths = [
+        process.env.PUPPETEER_EXECUTABLE_PATH,
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+        "/opt/google/chrome/chrome",
+        "/opt/google/chrome/chrome-linux/chrome",
+      ];
 
-    // Navigate with timeout
-    await page.goto(currentUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: PUPPETEER_TIMEOUT,
-    });
+      // Check if any of the possible paths exist
+      for (const path of possiblePaths) {
+        if (path && require("fs").existsSync(path)) {
+          puppeteerOptions.executablePath = path;
+          console.log(`Found Chrome at: ${path}`);
+          break;
+        }
+      }
 
-    // Wait for content to load using proper delay
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+      // If no Chrome found, try to use system Chrome
+      if (!puppeteerOptions.executablePath) {
+        console.log("No Chrome executable found, trying system Chrome...");
+        try {
+          const { execSync } = require("child_process");
+          const chromePath = execSync(
+            "which google-chrome || which chromium-browser || which chromium",
+            { encoding: "utf8" }
+          ).trim();
+          if (chromePath) {
+            puppeteerOptions.executablePath = chromePath;
+            console.log(`Using system Chrome: ${chromePath}`);
+          }
+        } catch (error) {
+          console.log("No system Chrome found, using default Puppeteer Chrome");
+        }
+      }
 
-    html = await page.content();
-    $ = cheerio.load(html);
+      browser = await puppeteer.launch(puppeteerOptions);
+      console.log("✅ Puppeteer launched successfully");
+    } catch (error) {
+      console.log(`❌ Puppeteer failed: ${error.message}`);
+      console.log("🔄 Falling back to basic HTTP requests...");
+      usePuppeteer = false;
+    }
+
+    if (usePuppeteer && browser) {
+      const page = await browser.newPage();
+
+      // Set user agent and viewport
+      await page.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+      );
+      await page.setViewport({ width: 1920, height: 1080 });
+
+      // Navigate with timeout
+      await page.goto(currentUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: PUPPETEER_TIMEOUT,
+      });
+
+      // Wait for content to load using proper delay
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      html = await page.content();
+      $ = cheerio.load(html);
+    } else {
+      // Fallback to basic HTTP request
+      console.log("📡 Using basic HTTP request for crawling...");
+      try {
+        const response = await axios.get(currentUrl, {
+          timeout: REQUEST_TIMEOUT,
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+          },
+        });
+        html = response.data;
+        $ = cheerio.load(html);
+      } catch (error) {
+        console.log(`❌ HTTP request failed: ${error.message}`);
+        throw new Error(`Failed to crawl ${currentUrl}: ${error.message}`);
+      }
+    }
 
     // --- Duplicate Content Detection ---
     const mainText = $("body").text().replace(/\s+/g, " ").trim().toLowerCase();
@@ -426,16 +492,33 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
       });
     }
 
-    // Extract links using Puppeteer for better accuracy
-    const links = await page.$$eval("a[href]", (anchors) =>
-      anchors
-        .map((a) => {
-          const href = a.getAttribute("href");
-          const text = a.textContent?.trim() || "";
-          return { href, text };
+    // Extract links
+    let links = [];
+
+    if (usePuppeteer && browser) {
+      // Extract links using Puppeteer for better accuracy
+      links = await page.$$eval("a[href]", (anchors) =>
+        anchors
+          .map((a) => {
+            const href = a.getAttribute("href");
+            const text = a.textContent?.trim() || "";
+            return { href, text };
+          })
+          .filter((item) => item.href && item.href.trim())
+      );
+    } else {
+      // Extract links using Cheerio
+      links = $("a[href]")
+        .map((_, el) => {
+          const $el = $(el);
+          return {
+            href: $el.attr("href"),
+            text: $el.text().trim(),
+          };
         })
-        .filter((item) => item.href && item.href.trim())
-    );
+        .get()
+        .filter((item) => item.href && item.href.trim());
+    }
 
     // Process links
     links.forEach(({ href, text }) => {
