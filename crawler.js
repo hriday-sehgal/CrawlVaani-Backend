@@ -308,7 +308,7 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
 
       // Check if any of the possible paths exist
       for (const path of possiblePaths) {
-        if (path && require("fs").existsSync(path)) {
+        if (path && fs.existsSync(path)) {
           puppeteerOptions.executablePath = path;
           console.log(`Found Chrome at: ${path}`);
           break;
@@ -319,7 +319,7 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
       if (!puppeteerOptions.executablePath) {
         console.log("No Chrome executable found, trying system Chrome...");
         try {
-          const { execSync } = require("child_process");
+          const { execSync } = await import("child_process");
           const chromePath = execSync(
             "which google-chrome || which chromium-browser || which chromium",
             { encoding: "utf8" }
@@ -913,8 +913,30 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
 async function runLighthouseAnalysis(url) {
   try {
     const { launch } = await import("chrome-launcher");
+
+    // Try to find Chrome executable for Lighthouse
+    let chromePath = null;
+    const possiblePaths = [
+      process.env.CHROME_PATH,
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium-browser",
+      "/usr/bin/chromium",
+      "/opt/google/chrome/chrome",
+      "/opt/google/chrome/chrome-linux/chrome",
+    ];
+
+    for (const path of possiblePaths) {
+      if (path && fs.existsSync(path)) {
+        chromePath = path;
+        console.log(`Lighthouse using Chrome at: ${path}`);
+        break;
+      }
+    }
+
     const chrome = await launch({
       chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"],
+      chromePath: chromePath,
     });
 
     const options = {
@@ -984,6 +1006,7 @@ async function runLighthouseAnalysis(url) {
     };
   } catch (error) {
     console.log(`❌ Lighthouse analysis failed for ${url}: ${error.message}`);
+    console.log("🔄 Lighthouse will be skipped for this crawl");
     return {
       url,
       lcp: 0,

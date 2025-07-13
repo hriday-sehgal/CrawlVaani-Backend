@@ -14,3 +14,5 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: CHROME_PATH
+        value: /opt/render/project/src/node_modules/puppeteer/.local-chromium/linux-1095492/chrome-linux/chrome
