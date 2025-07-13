@@ -341,26 +341,52 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
       usePuppeteer = false;
     }
 
+    let page = null;
+
     if (usePuppeteer && browser) {
-      const page = await browser.newPage();
+      try {
+        page = await browser.newPage();
 
-      // Set user agent and viewport
-      await page.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-      );
-      await page.setViewport({ width: 1920, height: 1080 });
+        // Set user agent and viewport
+        await page.setUserAgent(
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        );
+        await page.setViewport({ width: 1920, height: 1080 });
 
-      // Navigate with timeout
-      await page.goto(currentUrl, {
-        waitUntil: "domcontentloaded",
-        timeout: PUPPETEER_TIMEOUT,
-      });
+        // Navigate with timeout
+        await page.goto(currentUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: PUPPETEER_TIMEOUT,
+        });
 
-      // Wait for content to load using proper delay
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+        // Wait for content to load using proper delay
+        await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      html = await page.content();
-      $ = cheerio.load(html);
+        html = await page.content();
+        $ = cheerio.load(html);
+      } catch (pageError) {
+        console.log(`❌ Puppeteer page error: ${pageError.message}`);
+        console.log("🔄 Falling back to basic HTTP requests...");
+        usePuppeteer = false;
+        page = null;
+
+        // Fallback to basic HTTP request
+        console.log("📡 Using basic HTTP request for crawling...");
+        try {
+          const response = await axios.get(currentUrl, {
+            timeout: REQUEST_TIMEOUT,
+            headers: {
+              "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            },
+          });
+          html = response.data;
+          $ = cheerio.load(html);
+        } catch (error) {
+          console.log(`❌ HTTP request failed: ${error.message}`);
+          throw new Error(`Failed to crawl ${currentUrl}: ${error.message}`);
+        }
+      }
     } else {
       // Fallback to basic HTTP request
       console.log("📡 Using basic HTTP request for crawling...");
@@ -495,17 +521,34 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
     // Extract links
     let links = [];
 
-    if (usePuppeteer && browser) {
-      // Extract links using Puppeteer for better accuracy
-      links = await page.$$eval("a[href]", (anchors) =>
-        anchors
-          .map((a) => {
-            const href = a.getAttribute("href");
-            const text = a.textContent?.trim() || "";
-            return { href, text };
+    if (usePuppeteer && browser && page) {
+      try {
+        // Extract links using Puppeteer for better accuracy
+        links = await page.$$eval("a[href]", (anchors) =>
+          anchors
+            .map((a) => {
+              const href = a.getAttribute("href");
+              const text = a.textContent?.trim() || "";
+              return { href, text };
+            })
+            .filter((item) => item.href && item.href.trim())
+        );
+      } catch (linkError) {
+        console.log(
+          `❌ Puppeteer link extraction failed: ${linkError.message}`
+        );
+        // Fallback to Cheerio link extraction
+        links = $("a[href]")
+          .map((_, el) => {
+            const $el = $(el);
+            return {
+              href: $el.attr("href"),
+              text: $el.text().trim(),
+            };
           })
-          .filter((item) => item.href && item.href.trim())
-      );
+          .get()
+          .filter((item) => item.href && item.href.trim());
+      }
     } else {
       // Extract links using Cheerio
       links = $("a[href]")
