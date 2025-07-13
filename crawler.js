@@ -55,11 +55,11 @@ const performanceMetrics = {
   totalResponseTime: 0,
 };
 
-// Lighthouse configuration
+// Lighthouse configuration - SEO only for memory optimization
 const lighthouseConfig = {
   extends: "lighthouse:default",
   settings: {
-    onlyCategories: ["performance", "accessibility", "best-practices", "seo"],
+    onlyCategories: ["seo"], // Only SEO category to reduce memory usage
     formFactor: "desktop",
     throttling: {
       rttMs: 40,
@@ -78,6 +78,96 @@ const lighthouseConfig = {
     },
     emulatedUserAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    // Memory optimization settings
+    maxWaitForLoad: 30000, // 30 seconds max wait
+    skipAudits: [
+      // Skip non-SEO audits to reduce processing time
+      "uses-http2",
+      "uses-long-cache-ttl",
+      "efficient-animated-content",
+      "unused-css-rules",
+      "unused-javascript",
+      "modern-image-formats",
+      "uses-optimized-images",
+      "uses-text-compression",
+      "uses-responsive-images",
+      "unminified-css",
+      "unminified-javascript",
+      "unused-css-rules",
+      "render-blocking-resources",
+      "uses-rel-preload",
+      "uses-rel-preconnect",
+      "font-display",
+      "resource-hints",
+      "uses-passive-event-listeners",
+      "no-document-write",
+      "external-anchors-use-rel-noopener",
+      "geolocation-on-start",
+      "no-vulnerable-libraries",
+      "js-libraries",
+      "notification-on-start",
+      "password-inputs-can-be-pasted-into",
+      "image-aspect-ratio",
+      "image-size-responsive",
+      "preload-fonts",
+      "deprecations",
+      "errors-in-console",
+      "image-alt",
+      "label",
+      "link-name",
+      "list",
+      "listitem",
+      "button-name",
+      "frame-title",
+      "input-image-alt",
+      "object-alt",
+      "video-caption",
+      "aria-allowed-attr",
+      "aria-hidden-body",
+      "aria-hidden-focus",
+      "aria-input-field-name",
+      "aria-required-attr",
+      "aria-required-children",
+      "aria-required-parent",
+      "aria-roles",
+      "aria-valid-attr-value",
+      "aria-valid-attr",
+      "duplicate-id-active",
+      "duplicate-id-aria",
+      "form-field-multiple-labels",
+      "heading-order",
+      "html-has-lang",
+      "html-lang-valid",
+      "landmark-one-main",
+      "meta-refresh",
+      "meta-viewport",
+      "tabindex",
+      "td-headers-attr",
+      "th-has-data-cells",
+      "valid-lang",
+      "bypass",
+      "color-contrast",
+      "focus-traps",
+      "focusable-controls",
+      "interactive-element-affordance",
+      "logical-tab-order",
+      "managed-focus",
+      "offscreen-content-hidden",
+      "use-landmarks",
+      "visual-order-follows-dom",
+      "custom-controls-labels",
+      "custom-controls-roles",
+      "focusable-elements",
+      "heading-levels",
+      "link-text",
+      "list-structure",
+      "page-has-heading-one",
+      "skip-link",
+      "tabindex",
+      "target-size",
+      "text-spacing",
+      "valid-lang",
+    ],
   },
 };
 
@@ -315,18 +405,49 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
         }
       }
 
-      // If no Chrome found, try to use system Chrome
+      // If no Chrome found, try to use system Chrome (cross-platform)
       if (!puppeteerOptions.executablePath) {
         console.log("No Chrome executable found, trying system Chrome...");
         try {
           const { execSync } = await import("child_process");
-          const chromePath = execSync(
-            "which google-chrome || which chromium-browser || which chromium",
-            { encoding: "utf8" }
-          ).trim();
+          let chromePath = null;
+
+          // Cross-platform Chrome detection
+          if (process.platform === "win32") {
+            // Windows Chrome paths
+            const windowsPaths = [
+              "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+              "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+              process.env.LOCALAPPDATA +
+                "\\Google\\Chrome\\Application\\chrome.exe",
+            ];
+
+            for (const path of windowsPaths) {
+              if (fs.existsSync(path)) {
+                chromePath = path;
+                console.log(`Found Windows Chrome at: ${path}`);
+                break;
+              }
+            }
+          } else {
+            // Linux/Mac Chrome detection
+            try {
+              chromePath = execSync(
+                "which google-chrome || which chromium-browser || which chromium",
+                { encoding: "utf8" }
+              ).trim();
+            } catch (error) {
+              // Command not found, continue with default
+            }
+          }
+
           if (chromePath) {
             puppeteerOptions.executablePath = chromePath;
             console.log(`Using system Chrome: ${chromePath}`);
+          } else {
+            console.log(
+              "No system Chrome found, using default Puppeteer Chrome"
+            );
           }
         } catch (error) {
           console.log("No system Chrome found, using default Puppeteer Chrome");
@@ -353,7 +474,7 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
         );
         await page.setViewport({ width: 1920, height: 1080 });
 
-        // Navigate with timeout
+        // Navigate with timeout and better error handling
         await page.goto(currentUrl, {
           waitUntil: "domcontentloaded",
           timeout: PUPPETEER_TIMEOUT,
@@ -362,12 +483,26 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
         // Wait for content to load using proper delay
         await new Promise((resolve) => setTimeout(resolve, 2000));
 
-        html = await page.content();
-        $ = cheerio.load(html);
+        // Check if page is still valid before getting content
+        if (!page.isClosed()) {
+          html = await page.content();
+          $ = cheerio.load(html);
+        } else {
+          throw new Error("Page was closed unexpectedly");
+        }
       } catch (pageError) {
         console.log(`❌ Puppeteer page error: ${pageError.message}`);
         console.log("🔄 Falling back to basic HTTP requests...");
         usePuppeteer = false;
+
+        // Close page if it exists and is not closed
+        if (page && !page.isClosed()) {
+          try {
+            await page.close();
+          } catch (closeError) {
+            console.log(`Warning: Could not close page: ${closeError.message}`);
+          }
+        }
         page = null;
 
         // Fallback to basic HTTP request
@@ -957,7 +1092,7 @@ async function runLighthouseAnalysis(url) {
   try {
     const { launch } = await import("chrome-launcher");
 
-    // Try to find Chrome executable for Lighthouse
+    // Try to find Chrome executable for Lighthouse (cross-platform)
     let chromePath = null;
     const possiblePaths = [
       process.env.CHROME_PATH,
@@ -969,6 +1104,15 @@ async function runLighthouseAnalysis(url) {
       "/opt/google/chrome/chrome-linux/chrome",
     ];
 
+    // Add Windows Chrome paths for localhost
+    if (process.platform === "win32") {
+      possiblePaths.push(
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        process.env.LOCALAPPDATA + "\\Google\\Chrome\\Application\\chrome.exe"
+      );
+    }
+
     for (const path of possiblePaths) {
       if (path && fs.existsSync(path)) {
         chromePath = path;
@@ -978,88 +1122,141 @@ async function runLighthouseAnalysis(url) {
     }
 
     const chrome = await launch({
-      chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"],
+      chromeFlags: [
+        "--headless",
+        "--no-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage", // Reduce memory usage
+        "--disable-extensions",
+        "--disable-plugins",
+        "--disable-images", // Skip images for SEO-only analysis
+        "--disable-javascript", // Skip JS for faster processing
+        "--disable-css", // Skip CSS for faster processing
+        "--memory-pressure-off", // Reduce memory pressure
+        "--max_old_space_size=256", // Limit memory usage
+      ],
       chromePath: chromePath,
     });
 
     const options = {
-      logLevel: "info",
+      logLevel: "error", // Reduce logging for memory
       output: "json",
       port: chrome.port,
       ...lighthouseConfig,
     };
 
+    console.log(`🔍 Running Lighthouse SEO analysis for ${url}...`);
     const runnerResult = await lighthouse(url, options);
     const reportResults = runnerResult.lhr;
 
     await chrome.kill();
 
-    // Extract Web Core Vitals
-    const lcp =
-      reportResults.audits["largest-contentful-paint"]?.numericValue || 0;
-    const fid = reportResults.audits["max-potential-fid"]?.numericValue || 0;
-    const cls =
-      reportResults.audits["cumulative-layout-shift"]?.numericValue || 0;
-    const ttfb =
-      reportResults.audits["server-response-time"]?.numericValue || 0;
-
-    // Extract performance scores
-    const performanceScore = Math.round(
-      reportResults.categories.performance.score * 100
-    );
-    const accessibilityScore = Math.round(
-      reportResults.categories.accessibility.score * 100
-    );
-    const bestPracticesScore = Math.round(
-      reportResults.categories["best-practices"].score * 100
-    );
+    // Extract only SEO score and related data
     const seoScore = Math.round(reportResults.categories.seo.score * 100);
 
-    // Extract additional performance metrics
-    const firstContentfulPaint =
-      reportResults.audits["first-contentful-paint"]?.numericValue || 0;
-    const speedIndex = reportResults.audits["speed-index"]?.numericValue || 0;
-    const totalBlockingTime =
-      reportResults.audits["total-blocking-time"]?.numericValue || 0;
-    const timeToInteractive =
-      reportResults.audits["interactive"]?.numericValue || 0;
+    // Extract SEO-specific audit results
+    const seoAudits = {};
+    if (reportResults.audits) {
+      // Only extract SEO-related audits
+      const seoAuditKeys = [
+        "document-title",
+        "meta-description",
+        "link-text",
+        "is-crawlable",
+        "robots-txt",
+        "image-alt",
+        "hreflang",
+        "canonical",
+        "font-display",
+        "structured-data",
+        "meta-viewport",
+        "charset",
+        "tap-targets",
+        "content-width",
+        "crawlable-anchors",
+        "duplicate-meta-descriptions",
+        "duplicate-title",
+        "frame-title",
+        "html-has-lang",
+        "html-lang-valid",
+        "input-image-alt",
+        "label",
+        "link-name",
+        "list",
+        "listitem",
+        "object-alt",
+        "video-caption",
+        "video-description",
+        "aria-allowed-attr",
+        "aria-hidden-body",
+        "aria-hidden-focus",
+        "aria-input-field-name",
+        "aria-required-attr",
+        "aria-required-children",
+        "aria-required-parent",
+        "aria-roles",
+        "aria-valid-attr-value",
+        "aria-valid-attr",
+        "duplicate-id-active",
+        "duplicate-id-aria",
+        "form-field-multiple-labels",
+        "heading-order",
+        "landmark-one-main",
+        "meta-refresh",
+        "tabindex",
+        "td-headers-attr",
+        "th-has-data-cells",
+        "valid-lang",
+      ];
+
+      seoAuditKeys.forEach((key) => {
+        if (reportResults.audits[key]) {
+          seoAudits[key] = {
+            score: reportResults.audits[key].score,
+            displayValue: reportResults.audits[key].displayValue,
+            description: reportResults.audits[key].description,
+          };
+        }
+      });
+    }
 
     return {
       url,
-      lcp: Math.round(lcp),
-      fid: Math.round(fid),
-      cls: cls.toFixed(3),
-      ttfb: Math.round(ttfb),
-      performanceScore,
-      accessibilityScore,
-      bestPracticesScore,
       seoScore,
-      firstContentfulPaint: Math.round(firstContentfulPaint),
-      speedIndex: Math.round(speedIndex),
-      totalBlockingTime: Math.round(totalBlockingTime),
-      timeToInteractive: Math.round(timeToInteractive),
-      lcpStatus:
-        lcp <= 2500 ? "Good" : lcp <= 4000 ? "Needs Improvement" : "Poor",
-      fidStatus:
-        fid <= 100 ? "Good" : fid <= 300 ? "Needs Improvement" : "Poor",
-      clsStatus:
-        cls <= 0.1 ? "Good" : cls <= 0.25 ? "Needs Improvement" : "Poor",
-      ttfbStatus:
-        ttfb <= 800 ? "Good" : ttfb <= 1800 ? "Needs Improvement" : "Poor",
-    };
-  } catch (error) {
-    console.log(`❌ Lighthouse analysis failed for ${url}: ${error.message}`);
-    console.log("🔄 Lighthouse will be skipped for this crawl");
-    return {
-      url,
+      seoAudits,
+      // Minimal performance data for context
+      performanceScore: 0, // Not calculated in SEO-only mode
+      accessibilityScore: 0, // Not calculated in SEO-only mode
+      bestPracticesScore: 0, // Not calculated in SEO-only mode
       lcp: 0,
       fid: 0,
       cls: 0,
       ttfb: 0,
+      firstContentfulPaint: 0,
+      speedIndex: 0,
+      totalBlockingTime: 0,
+      timeToInteractive: 0,
+      lcpStatus: "Not Analyzed",
+      fidStatus: "Not Analyzed",
+      clsStatus: "Not Analyzed",
+      ttfbStatus: "Not Analyzed",
+    };
+  } catch (error) {
+    console.log(
+      `❌ Lighthouse SEO analysis failed for ${url}: ${error.message}`
+    );
+    console.log("🔄 Lighthouse will be skipped for this crawl");
+    return {
+      url,
+      seoScore: 0,
+      seoAudits: {},
       performanceScore: 0,
       accessibilityScore: 0,
       bestPracticesScore: 0,
-      seoScore: 0,
+      lcp: 0,
+      fid: 0,
+      cls: 0,
+      ttfb: 0,
       firstContentfulPaint: 0,
       speedIndex: 0,
       totalBlockingTime: 0,
