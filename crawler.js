@@ -298,8 +298,8 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
       // Try to find Chrome executable in common locations
       const possiblePaths = [
         process.env.PUPPETEER_EXECUTABLE_PATH,
+        "/usr/bin/google-chrome-stable", // Docker Chrome path
         "/usr/bin/google-chrome",
-        "/usr/bin/google-chrome-stable",
         "/usr/bin/chromium-browser",
         "/usr/bin/chromium",
         "/opt/google/chrome/chrome",
@@ -918,8 +918,8 @@ async function runLighthouseAnalysis(url) {
     let chromePath = null;
     const possiblePaths = [
       process.env.CHROME_PATH,
+      "/usr/bin/google-chrome-stable", // Docker Chrome path
       "/usr/bin/google-chrome",
-      "/usr/bin/google-chrome-stable",
       "/usr/bin/chromium-browser",
       "/usr/bin/chromium",
       "/opt/google/chrome/chrome",

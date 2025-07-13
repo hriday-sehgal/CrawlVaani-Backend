@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  backend:
+    build: .
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - ./reports:/app/reports
+    restart: unless-stopped
