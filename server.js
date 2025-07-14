@@ -1489,6 +1489,7 @@ app.get("/", (req, res) => {
       seoChecklist: "/api/seo-checklist/pdf",
       reports: "/api/reports/*",
     },
+    //hello test
     cors: {
       enabled: true,
       allowedOrigins: [
