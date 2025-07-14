@@ -1483,6 +1483,7 @@ app.get("/", (req, res) => {
     status: "ok",
     message: "CrawlVaani Backend API is running",
     version: "1.0.0",
+    test: "Auto-deploy working!",
     endpoints: {
       crawl: "/api/crawl",
       aiAnalysis: "/api/ai/comprehensive-analysis",
