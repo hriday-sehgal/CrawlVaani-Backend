@@ -1511,7 +1511,6 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`SEO Crawler backend running on http://localhost:${PORT}`);
   console.log(`Rate limit: ${MAX_REQUESTS_PER_HOUR} requests per hour per IP`);
-  console.log(`Page limit: 50000 pages per crawl`);
+  console.log(`Page limit: 2000 pages per crawl`);
   console.log(`AI Analysis: Available via /api/ai/* endpoints`);
-  console.log(`CORS: Enabled for frontend domains`);
 });

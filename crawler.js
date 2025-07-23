@@ -11,9 +11,9 @@ import path from "path";
 import crypto from "crypto";
 
 // Rate limiting and performance settings
-const MAX_PAGES = 50000; // Free tier limit
-const CONCURRENT_REQUESTS = 15; // Reduced for better performance
-const REQUEST_TIMEOUT = 15000; // 15 seconds
+const MAX_PAGES = 2000; // Free tier limit
+const CONCURRENT_REQUESTS = 10; // Reduced for better performance
+const REQUEST_TIMEOUT = 20000; // 20 seconds
 const PUPPETEER_TIMEOUT = 60000; // 60 seconds
 const RATE_LIMIT_DELAY = 100; // 100ms between requests
 
@@ -332,216 +332,53 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
     // Rate limiting
     await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_DELAY));
 
-    // Use Puppeteer for JavaScript-heavy sites
-    let browser = null;
-    let usePuppeteer = true;
-
-    try {
-      const puppeteerOptions = {
-        headless: "new",
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-accelerated-2d-canvas",
-          "--no-first-run",
-          "--no-zygote",
-          "--disable-gpu",
-          "--disable-web-security",
-          "--disable-features=VizDisplayCompositor",
-          "--disable-background-timer-throttling",
-          "--disable-backgrounding-occluded-windows",
-          "--disable-renderer-backgrounding",
-          "--disable-field-trial-config",
-          "--disable-ipc-flooding-protection",
-          "--disable-background-networking",
-          "--disable-default-apps",
-          "--disable-extensions",
-          "--disable-sync",
-          "--disable-translate",
-          "--hide-scrollbars",
-          "--mute-audio",
-          "--no-default-browser-check",
-          "--safebrowsing-disable-auto-update",
-          "--disable-client-side-phishing-detection",
-          "--disable-component-update",
-          "--disable-domain-reliability",
-          "--disable-features=TranslateUI",
-          "--disable-llm",
-          "--disable-logging",
-          "--disable-notifications",
-          "--disable-popup-blocking",
-          "--disable-prompt-on-repost",
-          "--disable-sync-preferences",
-          "--disable-web-resources",
-          "--disable-xss-auditor",
-          "--force-color-profile=srgb",
-          "--metrics-recording-only",
-          "--no-pings",
-          "--password-store=basic",
-          "--use-mock-keychain",
-          "--disable-blink-features=AutomationControlled",
-          "--single-process",
-          "--disable-gpu-sandbox",
-          "--disable-software-rasterizer",
-        ],
-      };
-
-      // Try to find Chrome executable in common locations
-      const possiblePaths = [
-        process.env.PUPPETEER_EXECUTABLE_PATH,
-        "/usr/bin/google-chrome-stable", // Docker Chrome path
-        "/usr/bin/google-chrome",
-        "/usr/bin/chromium-browser",
-        "/usr/bin/chromium",
-        "/opt/google/chrome/chrome",
-        "/opt/google/chrome/chrome-linux/chrome",
-      ];
-
-      // Check if any of the possible paths exist
-      for (const path of possiblePaths) {
-        if (path && fs.existsSync(path)) {
-          puppeteerOptions.executablePath = path;
-          console.log(`Found Chrome at: ${path}`);
-          break;
-        }
-      }
-
-      // If no Chrome found, try to use system Chrome (cross-platform)
-      if (!puppeteerOptions.executablePath) {
-        console.log("No Chrome executable found, trying system Chrome...");
-        try {
-          const { execSync } = await import("child_process");
-          let chromePath = null;
-
-          // Cross-platform Chrome detection
-          if (process.platform === "win32") {
-            // Windows Chrome paths
-            const windowsPaths = [
-              "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-              "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-              process.env.LOCALAPPDATA +
-                "\\Google\\Chrome\\Application\\chrome.exe",
-            ];
-
-            for (const path of windowsPaths) {
-              if (fs.existsSync(path)) {
-                chromePath = path;
-                console.log(`Found Windows Chrome at: ${path}`);
-                break;
-              }
-            }
-          } else {
-            // Linux/Mac Chrome detection
-            try {
-              chromePath = execSync(
-                "which google-chrome || which chromium-browser || which chromium",
-                { encoding: "utf8" }
-              ).trim();
-            } catch (error) {
-              // Command not found, continue with default
-            }
-          }
-
-          if (chromePath) {
-            puppeteerOptions.executablePath = chromePath;
-            console.log(`Using system Chrome: ${chromePath}`);
-          } else {
-            console.log(
-              "No system Chrome found, using default Puppeteer Chrome"
-            );
-          }
-        } catch (error) {
-          console.log("No system Chrome found, using default Puppeteer Chrome");
-        }
-      }
-
-      browser = await puppeteer.launch(puppeteerOptions);
-      console.log("✅ Puppeteer launched successfully");
-    } catch (error) {
-      console.log(`❌ Puppeteer failed: ${error.message}`);
-      console.log("🔄 Falling back to basic HTTP requests...");
-      usePuppeteer = false;
-    }
-
-    let page = null;
-
-    if (usePuppeteer && browser) {
-      try {
-        page = await browser.newPage();
-
-        // Set user agent and viewport
-        await page.setUserAgent(
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        );
-        await page.setViewport({ width: 1920, height: 1080 });
-
-        // Navigate with timeout and better error handling
-        await page.goto(currentUrl, {
-          waitUntil: "domcontentloaded",
-          timeout: PUPPETEER_TIMEOUT,
-        });
-
-        // Wait for content to load using proper delay
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-
-        // Check if page is still valid before getting content
-        if (!page.isClosed()) {
-          html = await page.content();
-          $ = cheerio.load(html);
-        } else {
-          throw new Error("Page was closed unexpectedly");
-        }
-      } catch (pageError) {
-        console.log(`❌ Puppeteer page error: ${pageError.message}`);
-        console.log("🔄 Falling back to basic HTTP requests...");
-        usePuppeteer = false;
-
-        // Close page if it exists and is not closed
-        if (page && !page.isClosed()) {
-          try {
-            await page.close();
-          } catch (closeError) {
-            console.log(`Warning: Could not close page: ${closeError.message}`);
-          }
-        }
-        page = null;
-
-        // Fallback to basic HTTP request
-        console.log("📡 Using basic HTTP request for crawling...");
-        try {
-          const response = await axios.get(currentUrl, {
-            timeout: REQUEST_TIMEOUT,
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            },
-          });
-          html = response.data;
-          $ = cheerio.load(html);
-        } catch (error) {
-          console.log(`❌ HTTP request failed: ${error.message}`);
-          throw new Error(`Failed to crawl ${currentUrl}: ${error.message}`);
-        }
-      }
-    } else {
-      // Fallback to basic HTTP request
-      console.log("📡 Using basic HTTP request for crawling...");
-      try {
-        const response = await axios.get(currentUrl, {
-          timeout: REQUEST_TIMEOUT,
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-          },
-        });
-        html = response.data;
-        $ = cheerio.load(html);
-      } catch (error) {
-        console.log(`❌ HTTP request failed: ${error.message}`);
-        throw new Error(`Failed to crawl ${currentUrl}: ${error.message}`);
-      }
-    }
+    // Use Puppeteer only (no Axios/Cheerio)
+    browser = await puppeteer.launch({
+      headless: "new",
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--disable-gpu",
+        "--disable-web-security",
+        "--disable-features=VizDisplayCompositor",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        "--disable-field-trial-config",
+        "--disable-ipc-flooding-protection",
+        "--disable-background-networking",
+        "--disable-default-apps",
+        "--disable-extensions",
+        "--disable-sync",
+        "--disable-translate",
+        "--hide-scrollbars",
+        "--mute-audio",
+        "--no-default-browser-check",
+        "--safebrowsing-disable-auto-update",
+        "--disable-client-side-phishing-detection",
+        "--disable-component-update",
+        "--disable-domain-reliability",
+        "--disable-features=TranslateUI",
+        "--disable-llm",
+        "--disable-logging",
+        "--disable-notifications",
+        "--disable-popup-blocking",
+        "--disable-software-rasterizer",
+      ],
+    });
+    const page = await browser.newPage();
+    await page.goto(currentUrl, {
+      timeout: PUPPETEER_TIMEOUT,
+      waitUntil: "domcontentloaded",
+    });
+    html = await page.content();
+    $ = cheerio.load(html);
+    await page.close();
+    await browser.close();
 
     // --- Duplicate Content Detection ---
     const mainText = $("body").text().replace(/\s+/g, " ").trim().toLowerCase();
@@ -658,47 +495,17 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
     // Extract links
     let links = [];
 
-    if (usePuppeteer && browser && page) {
-      try {
-        // Extract links using Puppeteer for better accuracy
-        links = await page.$$eval("a[href]", (anchors) =>
-          anchors
-            .map((a) => {
-              const href = a.getAttribute("href");
-              const text = a.textContent?.trim() || "";
-              return { href, text };
-            })
-            .filter((item) => item.href && item.href.trim())
-        );
-      } catch (linkError) {
-        console.log(
-          `❌ Puppeteer link extraction failed: ${linkError.message}`
-        );
-        // Fallback to Cheerio link extraction
-        links = $("a[href]")
-          .map((_, el) => {
-            const $el = $(el);
-            return {
-              href: $el.attr("href"),
-              text: $el.text().trim(),
-            };
-          })
-          .get()
-          .filter((item) => item.href && item.href.trim());
-      }
-    } else {
-      // Extract links using Cheerio
-      links = $("a[href]")
-        .map((_, el) => {
-          const $el = $(el);
-          return {
-            href: $el.attr("href"),
-            text: $el.text().trim(),
-          };
-        })
-        .get()
-        .filter((item) => item.href && item.href.trim());
-    }
+    // Extract links using Cheerio
+    links = $("a[href]")
+      .map((_, el) => {
+        const $el = $(el);
+        return {
+          href: $el.attr("href"),
+          text: $el.text().trim(),
+        };
+      })
+      .get()
+      .filter((item) => item.href && item.href.trim());
 
     // Process links
     links.forEach(({ href, text }) => {
@@ -1018,77 +825,18 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
 
     // Mark as working link
     workingLinks.push({ url: currentUrl, status: 200 });
+
+    // Aggressively clear memory for large arrays/objects
+    html = null;
+    $ = null;
+    if (global.gc) global.gc(); // If running with --expose-gc
   } catch (err) {
-    performanceMetrics.errors++;
-    const status =
-      err.response?.status || err.code || err.message || "Unknown Error";
-    brokenLinks.push({ url: currentUrl, status });
-    console.log(`❌ Failed (Puppeteer): ${currentUrl} (${status})`);
-
-    // Fallback to axios for failed Puppeteer requests
-    try {
-      const response = await axios.get(currentUrl, {
-        timeout: REQUEST_TIMEOUT,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        },
-      });
-
-      $ = cheerio.load(response.data);
-      workingLinks.push({ url: currentUrl, status: response.status });
-
-      // Extract meta tags from fallback
-      const { metaTags: pageMetaTags, ogTags: pageOgTags } = extractMetaTags(
-        $,
-        currentUrl
-      );
-      metaTags.push(...pageMetaTags);
-      ogTags.push(...pageOgTags);
-
-      // Basic SEO extraction for fallback
-      const title = $("title").text().trim();
-      const description = $('meta[name="description"]').attr("content") || "";
-      const canonical = $('link[rel="canonical"]').attr("href") || "";
-
-      seoInsights.push({
-        url: currentUrl,
-        title,
-        description,
-        h1Count: $("h1").length,
-        canonical,
-        ogTitle: $('meta[property="og:title"]').attr("content") || "",
-        ogImage: $('meta[property="og:image"]').attr("content") || "",
-        ogDescription:
-          $('meta[property="og:description"]').attr("content") || "",
-        ogType: $('meta[property="og:type"]').attr("content") || "",
-        ogUrl: $('meta[property="og:url"]').attr("content") || "",
-        twitterCard: $('meta[name="twitter:card"]').attr("content") || "",
-        twitterTitle: $('meta[name="twitter:title"]').attr("content") || "",
-        twitterDescription:
-          $('meta[name="twitter:description"]').attr("content") || "",
-        twitterImage: $('meta[name="twitter:image"]').attr("content") || "",
-        robots: $('meta[name="robots"]').attr("content") || "",
-        viewport: $('meta[name="viewport"]').attr("content") || "",
-        favicon: $('link[rel="icon"]').attr("href") || "",
-        language: $("html").attr("lang") || "",
-        charset: $("meta[charset]").attr("charset") || "",
-        wordCount: $("body").text().split(/\s+/).length,
-        imageCount: $("img").length,
-        linkCount: $("a").length,
-      });
-    } catch (axiosErr) {
-      console.log(`❌ Failed (axios fallback): ${currentUrl}`);
-    }
-  } finally {
-    // Always close the browser
     if (browser) {
       try {
         await browser.close();
-      } catch (closeErr) {
-        console.log(`⚠️ Error closing browser: ${closeErr.message}`);
-      }
+      } catch {}
     }
+    brokenLinks.push({ url: currentUrl, status: err.message });
   }
 }
 
@@ -1344,12 +1092,8 @@ export async function runCrawl(targetUrl, outputDir = "reports") {
     }
 
     while (queue.length > 0 && visited.size < MAX_PAGES) {
-      const batch = queue.splice(0, CONCURRENT_REQUESTS);
-      await Promise.all(
-        batch.map((link) =>
-          crawlLimit(() => crawlPage(link, queue, base, base, baseDomain))
-        )
-      );
+      const currentUrl = queue.shift();
+      await crawlPage(currentUrl, queue, base, base, baseDomain);
     }
 
     console.log(
