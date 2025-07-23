@@ -741,7 +741,7 @@ export async function generateSEOChecklistPDF() {
               <div class="footer-text">
                 This checklist contains proven strategies that can significantly improve your search engine rankings and drive more organic traffic to your website. Start with the high-priority items and work your way through the list systematically. Remember, SEO is a long-term process, but these fixes will help you see results faster.
               </div>
-              <a href="https://crawlvaani.com" class="footer-cta">Get Your Free SEO Audit</a>
+              <a href="https://crawlvaani.vercel.app" class="footer-cta">Get Your Free SEO Audit</a>
             </div>
           </div>
         </div>

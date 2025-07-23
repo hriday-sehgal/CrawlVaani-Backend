@@ -12,10 +12,10 @@ import crypto from "crypto";
 
 // Rate limiting and performance settings
 const MAX_PAGES = 2000; // Free tier limit
-const CONCURRENT_REQUESTS = 10; // Reduced for better performance
+const CONCURRENT_REQUESTS = 10; // Slightly increased for better performance
 const REQUEST_TIMEOUT = 20000; // 20 seconds
-const PUPPETEER_TIMEOUT = 60000; // 60 seconds
-const RATE_LIMIT_DELAY = 100; // 100ms between requests
+const PUPPETEER_TIMEOUT = 50000; // 50 seconds, reduced to avoid slow pages blocking
+const RATE_LIMIT_DELAY = 80; // 80ms between requests, faster but still safe
 
 // Global state
 const visited = new Set();
@@ -1091,10 +1091,24 @@ export async function runCrawl(targetUrl, outputDir = "reports") {
       sitemapRobotsInfo.push({ url: base + "sitemap.xml", status: "missing" });
     }
 
-    while (queue.length > 0 && visited.size < MAX_PAGES) {
-      const currentUrl = queue.shift();
-      await crawlPage(currentUrl, queue, base, base, baseDomain);
+    // Efficient parallel crawling with a dynamic worker pool
+    async function worker() {
+      while (true) {
+        let currentUrl;
+        // Critical section to avoid race conditions
+        if (queue.length > 0 && visited.size < MAX_PAGES) {
+          currentUrl = queue.shift();
+        } else {
+          break;
+        }
+        await crawlPage(currentUrl, queue, base, base, baseDomain);
+      }
     }
+    const workers = [];
+    for (let i = 0; i < CONCURRENT_REQUESTS; i++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
 
     console.log(
       `\n✅ Crawl completed! Pages crawled: ${visited.size}/${MAX_PAGES}`
