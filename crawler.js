@@ -9,10 +9,12 @@ import analyzeKeywords from "./utils/keywordDensity.js";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import async from "async";
+import xml2js from "xml2js";
 
 // Rate limiting and performance settings
 const MAX_PAGES = 2000; // Free tier limit
-const CONCURRENT_REQUESTS = 10; // Slightly increased for better performance
+const CONCURRENT_REQUESTS = 5; // Slightly increased for better performance
 const REQUEST_TIMEOUT = 20000; // 20 seconds
 const PUPPETEER_TIMEOUT = 50000; // 50 seconds, reduced to avoid slow pages blocking
 const RATE_LIMIT_DELAY = 80; // 80ms between requests, faster but still safe
@@ -312,6 +314,28 @@ function extractLinks($, currentUrl, base) {
   });
 
   return { links, internalLinks, externalLinks };
+}
+
+// Helper to fetch and parse sitemap URLs (handles nested sitemaps)
+async function getSitemapUrls(sitemapUrl, seen = new Set()) {
+  if (seen.has(sitemapUrl)) return [];
+  seen.add(sitemapUrl);
+  try {
+    const res = await axios.get(sitemapUrl, { timeout: 15000 });
+    const parsed = await xml2js.parseStringPromise(res.data);
+    let urls = [];
+    if (parsed.urlset && parsed.urlset.url) {
+      urls = parsed.urlset.url.map((u) => u.loc[0]);
+    } else if (parsed.sitemapindex && parsed.sitemapindex.sitemap) {
+      for (const sm of parsed.sitemapindex.sitemap) {
+        const subUrls = await getSitemapUrls(sm.loc[0], seen);
+        urls = urls.concat(subUrls);
+      }
+    }
+    return urls;
+  } catch (e) {
+    return [];
+  }
 }
 
 async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
@@ -1064,10 +1088,25 @@ export async function runCrawl(targetUrl, outputDir = "reports") {
     console.log(`🔍 Starting crawl of ${base}... (Max ${MAX_PAGES} pages)`);
     const queue = [base];
 
+    // --- SITEMAP DISCOVERY & QUEUEING ---
     try {
-      await axios.get(base + "robots.txt");
-      seoInsights.push({ url: base + "robots.txt", note: "robots.txt found" });
-      sitemapRobotsInfo.push({ url: base + "robots.txt", status: "found" });
+      // robots.txt check
+      const robotsRes = await axios.get(base + "robots.txt", {
+        validateStatus: null,
+      });
+      if (robotsRes.status === 200) {
+        seoInsights.push({
+          url: base + "robots.txt",
+          note: "robots.txt found",
+        });
+        sitemapRobotsInfo.push({ url: base + "robots.txt", status: "found" });
+      } else {
+        seoInsights.push({
+          url: base + "robots.txt",
+          note: "robots.txt missing",
+        });
+        sitemapRobotsInfo.push({ url: base + "robots.txt", status: "missing" });
+      }
     } catch {
       seoInsights.push({
         url: base + "robots.txt",
@@ -1076,13 +1115,35 @@ export async function runCrawl(targetUrl, outputDir = "reports") {
       sitemapRobotsInfo.push({ url: base + "robots.txt", status: "missing" });
     }
 
+    // SITEMAP: Parse and queue all URLs from sitemap(s)
     try {
-      await axios.get(base + "sitemap.xml");
-      seoInsights.push({
-        url: base + "sitemap.xml",
-        note: "sitemap.xml found",
-      });
-      sitemapRobotsInfo.push({ url: base + "sitemap.xml", status: "found" });
+      const sitemapUrl = base + "sitemap.xml";
+      const sitemapRes = await axios.get(sitemapUrl, { validateStatus: null });
+      if (sitemapRes.status === 200) {
+        const sitemapUrls = await getSitemapUrls(sitemapUrl);
+        if (sitemapUrls.length > 0) {
+          seoInsights.push({
+            url: sitemapUrl,
+            note: `sitemap.xml found (${sitemapUrls.length} URLs)`,
+          });
+          sitemapRobotsInfo.push({ url: sitemapUrl, status: "found" });
+          // Add all unique sitemap URLs to the queue (if not already visited or queued)
+          for (const url of sitemapUrls) {
+            if (!visited.has(url) && !queue.includes(url)) {
+              queue.push(url);
+            }
+          }
+        } else {
+          seoInsights.push({
+            url: sitemapUrl,
+            note: "sitemap.xml found but no URLs",
+          });
+          sitemapRobotsInfo.push({ url: sitemapUrl, status: "found" });
+        }
+      } else {
+        seoInsights.push({ url: sitemapUrl, note: "sitemap.xml missing" });
+        sitemapRobotsInfo.push({ url: sitemapUrl, status: "missing" });
+      }
     } catch {
       seoInsights.push({
         url: base + "sitemap.xml",
@@ -1091,24 +1152,24 @@ export async function runCrawl(targetUrl, outputDir = "reports") {
       sitemapRobotsInfo.push({ url: base + "sitemap.xml", status: "missing" });
     }
 
-    // Efficient parallel crawling with a dynamic worker pool
-    async function worker() {
-      while (true) {
-        let currentUrl;
-        // Critical section to avoid race conditions
-        if (queue.length > 0 && visited.size < MAX_PAGES) {
-          currentUrl = queue.shift();
-        } else {
-          break;
+    // True parallel crawling using async.queue
+    const scheduled = new Set();
+    const q = async.queue(async (url, done) => {
+      if (visited.size >= MAX_PAGES) return done();
+      if (scheduled.has(url)) return done();
+      scheduled.add(url);
+      await crawlPage(url, queue, base, base, baseDomain);
+      // As crawlPage adds new URLs to the queue, push them to async.queue
+      while (queue.length > 0 && visited.size < MAX_PAGES) {
+        const nextUrl = queue.shift();
+        if (!scheduled.has(nextUrl)) {
+          q.push(nextUrl);
         }
-        await crawlPage(currentUrl, queue, base, base, baseDomain);
       }
-    }
-    const workers = [];
-    for (let i = 0; i < CONCURRENT_REQUESTS; i++) {
-      workers.push(worker());
-    }
-    await Promise.all(workers);
+      done();
+    }, CONCURRENT_REQUESTS);
+    q.push(base);
+    await q.drain();
 
     console.log(
       `\n✅ Crawl completed! Pages crawled: ${visited.size}/${MAX_PAGES}`

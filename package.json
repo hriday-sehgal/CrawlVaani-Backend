@@ -10,6 +10,7 @@
     "postinstall": "puppeteer browsers install chrome"
   },
   "dependencies": {
+    "async": "^3.2.6",
     "axios": "^1.9.0",
     "bottleneck": "^2.19.5",
     "cheerio": "^1.0.0",
@@ -33,7 +34,8 @@
     "robots-txt-parser": "^2.0.3",
     "sitemapper": "^3.2.20",
     "valid-url": "^1.0.9",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "xml2js": "^0.6.2"
   },
   "engines": {
     "node": ">=18.0.0"
