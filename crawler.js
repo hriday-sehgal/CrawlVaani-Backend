@@ -338,7 +338,15 @@ async function getSitemapUrls(sitemapUrl, seen = new Set()) {
   }
 }
 
-async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
+async function crawlPage(
+  currentUrl,
+  queue,
+  base,
+  mainPageUrl,
+  baseDomain,
+  browser
+) {
+  currentUrl = normalizeUrl(currentUrl);
   if (visited.has(currentUrl) || visited.size >= MAX_PAGES) return;
 
   visited.add(currentUrl);
@@ -350,51 +358,14 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
   const pageStartTime = Date.now();
   let html = "";
   let $;
-  let browser = null;
+  let page = null;
 
   try {
     // Rate limiting
     await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_DELAY));
 
-    // Use Puppeteer only (no Axios/Cheerio)
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--disable-gpu",
-        "--disable-web-security",
-        "--disable-features=VizDisplayCompositor",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-renderer-backgrounding",
-        "--disable-field-trial-config",
-        "--disable-ipc-flooding-protection",
-        "--disable-background-networking",
-        "--disable-default-apps",
-        "--disable-extensions",
-        "--disable-sync",
-        "--disable-translate",
-        "--hide-scrollbars",
-        "--mute-audio",
-        "--no-default-browser-check",
-        "--safebrowsing-disable-auto-update",
-        "--disable-client-side-phishing-detection",
-        "--disable-component-update",
-        "--disable-domain-reliability",
-        "--disable-features=TranslateUI",
-        "--disable-llm",
-        "--disable-logging",
-        "--disable-notifications",
-        "--disable-popup-blocking",
-        "--disable-software-rasterizer",
-      ],
-    });
-    const page = await browser.newPage();
+    // Reuse the provided browser instance
+    page = await browser.newPage();
     await page.goto(currentUrl, {
       timeout: PUPPETEER_TIMEOUT,
       waitUntil: "domcontentloaded",
@@ -402,7 +373,6 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
     html = await page.content();
     $ = cheerio.load(html);
     await page.close();
-    await browser.close();
 
     // --- Duplicate Content Detection ---
     const mainText = $("body").text().replace(/\s+/g, " ").trim().toLowerCase();
@@ -855,9 +825,9 @@ async function crawlPage(currentUrl, queue, base, mainPageUrl, baseDomain) {
     $ = null;
     if (global.gc) global.gc(); // If running with --expose-gc
   } catch (err) {
-    if (browser) {
+    if (page) {
       try {
-        await browser.close();
+        await page.close();
       } catch {}
     }
     brokenLinks.push({ url: currentUrl, status: err.message });
@@ -1048,6 +1018,14 @@ async function runLighthouseAnalysis(url) {
 }
 */
 
+function normalizeUrl(url) {
+  try {
+    return new URL(url).href;
+  } catch (e) {
+    return url; // Return original if invalid
+  }
+}
+
 export async function runCrawl(targetUrl, outputDir = "reports") {
   // Reset all stateful arrays and sets
   visited.clear();
@@ -1086,7 +1064,7 @@ export async function runCrawl(targetUrl, outputDir = "reports") {
 
   async function generateReport() {
     console.log(`🔍 Starting crawl of ${base}... (Max ${MAX_PAGES} pages)`);
-    const queue = [base];
+    const queue = [normalizeUrl(base)];
 
     // --- SITEMAP DISCOVERY & QUEUEING ---
     try {
@@ -1152,13 +1130,52 @@ export async function runCrawl(targetUrl, outputDir = "reports") {
       sitemapRobotsInfo.push({ url: base + "sitemap.xml", status: "missing" });
     }
 
+    // Launch a single browser instance for the entire crawl
+    const browser = await puppeteer.launch({
+      headless: "new",
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--disable-gpu",
+        "--disable-web-security",
+        "--disable-features=VizDisplayCompositor",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        "--disable-field-trial-config",
+        "--disable-ipc-flooding-protection",
+        "--disable-background-networking",
+        "--disable-default-apps",
+        "--disable-extensions",
+        "--disable-sync",
+        "--disable-translate",
+        "--hide-scrollbars",
+        "--mute-audio",
+        "--no-default-browser-check",
+        "--safebrowsing-disable-auto-update",
+        "--disable-client-side-phishing-detection",
+        "--disable-component-update",
+        "--disable-domain-reliability",
+        "--disable-features=TranslateUI",
+        "--disable-llm",
+        "--disable-logging",
+        "--disable-notifications",
+        "--disable-popup-blocking",
+        "--disable-software-rasterizer",
+      ],
+    });
+
     // True parallel crawling using async.queue
     const scheduled = new Set();
     const q = async.queue(async (url, done) => {
       if (visited.size >= MAX_PAGES) return done();
       if (scheduled.has(url)) return done();
       scheduled.add(url);
-      await crawlPage(url, queue, base, base, baseDomain);
+      await crawlPage(url, queue, base, base, baseDomain, browser);
       // As crawlPage adds new URLs to the queue, push them to async.queue
       while (queue.length > 0 && visited.size < MAX_PAGES) {
         const nextUrl = queue.shift();
@@ -1168,8 +1185,10 @@ export async function runCrawl(targetUrl, outputDir = "reports") {
       }
       done();
     }, CONCURRENT_REQUESTS);
-    q.push(base);
+    q.push(normalizeUrl(base));
     await q.drain();
+
+    await browser.close();
 
     console.log(
       `\n✅ Crawl completed! Pages crawled: ${visited.size}/${MAX_PAGES}`
