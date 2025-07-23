@@ -14,7 +14,7 @@ import xml2js from "xml2js";
 
 // Rate limiting and performance settings
 const MAX_PAGES = 2000; // Free tier limit
-const CONCURRENT_REQUESTS = 5; // Slightly increased for better performance
+const CONCURRENT_REQUESTS = 2; // Slightly increased for better performance
 const REQUEST_TIMEOUT = 20000; // 20 seconds
 const PUPPETEER_TIMEOUT = 50000; // 50 seconds, reduced to avoid slow pages blocking
 const RATE_LIMIT_DELAY = 80; // 80ms between requests, faster but still safe
